@@ -6,6 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+<link rel="preconnect" href="https://raw.githubusercontent.com" crossorigin>
+<link rel="dns-prefetch" href="https://majimax.github.io">
 <base href="./">
 <title>🚃 矿车跑酷</title>
 <style>
@@ -115,6 +117,39 @@ async function loadImageWithRetry(src, retries = 2) {
   }
 }
 
+// 生成占位图（任何资源加载失败时用，保证游戏能玩）
+// w/h 是目标尺寸，color 背景色，type 决定形状：land/trap/role/bg
+function makePlaceholder(w, h, type, color = '#888') {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  x.fillStyle = color;
+  x.fillRect(0, 0, w, h);
+  // 装饰
+  if (type === 'trap' || type === 'trap2') {
+    x.fillStyle = '#ff5252';
+    const sy = type === 'trap' ? h * 0.5 : 0;
+    for (let i = 0; i < w; i += 8) {
+      x.beginPath();
+      if (type === 'trap') {
+        x.moveTo(i, sy); x.lineTo(i + 4, sy - 6); x.lineTo(i + 8, sy);
+      } else {
+        x.moveTo(i, sy); x.lineTo(i + 4, sy + 6); x.lineTo(i + 8, sy);
+      }
+      x.fill();
+    }
+  } else {
+    x.fillStyle = '#fff';
+    x.font = `${Math.min(10, h - 4)}px monospace`;
+    x.textAlign = 'center';
+    x.textBaseline = 'middle';
+    x.fillText(type, w / 2, h / 2);
+  }
+  const img = new Image();
+  img.src = c.toDataURL();
+  return img;
+}
+
 let _loadCount = 0;
 async function reportProgress(total) {
   _loadCount++;
@@ -129,41 +164,74 @@ async function loadAssets() {
   const b = 'assets/';
   const tasks = [];
 
-  // 角色 7 个
+  // 角色 7 个（占位 36x36, 颜色随机）
+  const roleColors = ['#ff8a65','#ffb74d','#fff176','#aed581','#4dd0e1','#7986cb','#ba68c8'];
   for (let i = 1; i <= 7; i++) {
-    tasks.push({ src: `${b}role/role_${i}.png?v=${_v}`, onDone: img => ASSETS.role.push(img) });
+    tasks.push({
+      src: `${b}role/role_${i}.png?v=${_v}`,
+      onDone: img => ASSETS.role.push(img),
+      fallback: () => makePlaceholder(36, 36, 'R' + i, roleColors[i-1])
+    });
   }
 
-  // 背景 3 个时间段（只用 bg_1）
+  // 背景 3 个时间段（占位 256x208）
+  const bgColors = { day: '#7ec0ee', eve: '#ff8a65', night: '#1a237e' };
   for (const p of ['day', 'eve', 'night']) {
-    tasks.push({ src: `${b}bg/bg_1_${p}.png?v=${_v}`, onDone: img => ASSETS.bg[p] = img });
+    tasks.push({
+      src: `${b}bg/bg_1_${p}.png?v=${_v}`,
+      onDone: img => ASSETS.bg[p] = img,
+      fallback: () => makePlaceholder(256, 208, p, bgColors[p])
+    });
   }
 
-  // 地面 4 个（land_1_1 ~ land_1_4，不用 land_1_5）
+  // 地面 4 个（占位按尺寸）
   for (let i = 1; i <= 4; i++) {
-    tasks.push({ src: `${b}land/land_1_${i}.png?v=${_v}`, onDone: img => ASSETS.land.push(img) });
+    const w = [64,128,160,192][i-1];
+    tasks.push({
+      src: `${b}land/land_1_${i}.png?v=${_v}`,
+      onDone: img => ASSETS.land.push(img),
+      fallback: () => makePlaceholder(w, 16, 'L'+i, '#ffb74d')
+    });
   }
-  // 陷阱 trap_1_1（地面刺朝上）+ trap_2_1, trap_2_2（高台吊刺朝下）
-  tasks.push({ src: `${b}land/trap_1_1.png?v=${_v}`, onDone: img => ASSETS.trap1.push(img) });
-  tasks.push({ src: `${b}land/trap_2_1.png?v=${_v}`, onDone: img => ASSETS.trap2.push(img) });
-  tasks.push({ src: `${b}land/trap_2_2.png?v=${_v}`, onDone: img => ASSETS.trap2.push(img) });
+  // 陷阱 trap_1_1 (64x24) + trap_2_1 (128x24), trap_2_2 (160x24)
+  tasks.push({
+    src: `${b}land/trap_1_1.png?v=${_v}`,
+    onDone: img => ASSETS.trap1.push(img),
+    fallback: () => makePlaceholder(64, 24, 'trap', '#ff5252')
+  });
+  tasks.push({
+    src: `${b}land/trap_2_1.png?v=${_v}`,
+    onDone: img => ASSETS.trap2.push(img),
+    fallback: () => makePlaceholder(128, 24, 'trap2', '#e91e63')
+  });
+  tasks.push({
+    src: `${b}land/trap_2_2.png?v=${_v}`,
+    onDone: img => ASSETS.trap2.push(img),
+    fallback: () => makePlaceholder(160, 24, 'trap2', '#e91e63')
+  });
 
   document.getElementById('load-total').textContent = tasks.length;
 
-  // 并行加载所有资源（带重试），总耗时 = 最慢一张的时间
+  // 分批并行（每批 3 个），避免浏览器开 6+ 连接导致每个都慢
   let done = 0;
-  const settled = await Promise.allSettled(
-    tasks.map(async t => {
-      const img = await loadImageWithRetry(t.src);
-      t.onDone(img);
+  const BATCH = 3;
+  for (let i = 0; i < tasks.length; i += BATCH) {
+    const batch = tasks.slice(i, i + BATCH);
+    await Promise.allSettled(batch.map(async t => {
+      try {
+        const img = await loadImageWithRetry(t.src);
+        t.onDone(img);
+      } catch (e) {
+        // 失败用占位图（游戏依然可玩）
+        console.warn('使用占位图:', t.src, e.message);
+        t.onDone(t.fallback());
+      }
       done++;
       document.getElementById('load-count').textContent = done;
       document.getElementById('load-bar-fill').style.width = (done / tasks.length * 100).toFixed(1) + '%';
-    })
-  );
-  // 任何一个失败都抛错
-  const failed = settled.find(s => s.status === 'rejected');
-  if (failed) throw failed.reason;
+    }));
+  }
+  // 永不失败：所有图都有 fallback
 }
 
 // ===== 玩家 =====
@@ -516,12 +584,6 @@ function showOverlay(title, scoreText) {
 }
 
 // ===== 启动 =====
-function showLoadError(msg) {
-  document.getElementById('overlay').innerHTML = `
-    <h2>❌ 资源加载失败</h2>
-    <div class="hint">${msg}</div>`;
-}
-
 (async function start() {
   try {
     await loadAssets();
@@ -533,8 +595,8 @@ function showLoadError(msg) {
     document.getElementById('start-btn').classList.remove('hidden');
     requestAnimationFrame(loop);
   } catch (e) {
-    console.error('资源加载失败:', e);
-    showLoadError(e.message);
+    // 永远不会到这里（loadAssets 永不抛错）
+    console.error('Unexpected:', e);
   }
 })();
 </script>
