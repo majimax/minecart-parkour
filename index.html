@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <base href="./">
 <title>🚃 矿车跑酷</title>
 <style>
@@ -90,11 +93,12 @@ const ASSETS = {
   trap2: []                  // trap_2_1, trap_2_2 高台吊刺（朝下）
 };
 
-function loadImage(src) {
+function loadImage(src, timeoutMs = 8000) {
   return new Promise((res, rej) => {
     const i = new Image();
-    i.onload = () => res(i);
-    i.onerror = () => rej(new Error('无法加载: ' + src));
+    const timer = setTimeout(() => rej(new Error('加载超时: ' + src)), timeoutMs);
+    i.onload = () => { clearTimeout(timer); res(i); };
+    i.onerror = () => { clearTimeout(timer); rej(new Error('无法加载: ' + src)); };
     i.src = src;
   });
 }
@@ -106,28 +110,31 @@ async function reportProgress(total) {
   document.getElementById('load-bar-fill').style.width = (_loadCount / total * 100).toFixed(1) + '%';
 }
 
+// 缓存破坏器：避免 GitHub Pages 缓存
+const _v = Date.now();
+
 async function loadAssets() {
   const b = 'assets/';
   const tasks = [];
 
   // 角色 7 个
   for (let i = 1; i <= 7; i++) {
-    tasks.push({ src: `${b}role/role_${i}.png`, onDone: img => ASSETS.role.push(img) });
+    tasks.push({ src: `${b}role/role_${i}.png?v=${_v}`, onDone: img => ASSETS.role.push(img) });
   }
 
   // 背景 3 个时间段（只用 bg_1）
   for (const p of ['day', 'eve', 'night']) {
-    tasks.push({ src: `${b}bg/bg_1_${p}.png`, onDone: img => ASSETS.bg[p] = img });
+    tasks.push({ src: `${b}bg/bg_1_${p}.png?v=${_v}`, onDone: img => ASSETS.bg[p] = img });
   }
 
   // 地面 4 个（land_1_1 ~ land_1_4，不用 land_1_5）
   for (let i = 1; i <= 4; i++) {
-    tasks.push({ src: `${b}land/land_1_${i}.png`, onDone: img => ASSETS.land.push(img) });
+    tasks.push({ src: `${b}land/land_1_${i}.png?v=${_v}`, onDone: img => ASSETS.land.push(img) });
   }
   // 陷阱 trap_1_1（地面刺朝上）+ trap_2_1, trap_2_2（高台吊刺朝下）
-  tasks.push({ src: `${b}land/trap_1_1.png`, onDone: img => ASSETS.trap1.push(img) });
-  tasks.push({ src: `${b}land/trap_2_1.png`, onDone: img => ASSETS.trap2.push(img) });
-  tasks.push({ src: `${b}land/trap_2_2.png`, onDone: img => ASSETS.trap2.push(img) });
+  tasks.push({ src: `${b}land/trap_1_1.png?v=${_v}`, onDone: img => ASSETS.trap1.push(img) });
+  tasks.push({ src: `${b}land/trap_2_1.png?v=${_v}`, onDone: img => ASSETS.trap2.push(img) });
+  tasks.push({ src: `${b}land/trap_2_2.png?v=${_v}`, onDone: img => ASSETS.trap2.push(img) });
 
   document.getElementById('load-total').textContent = tasks.length;
   for (const t of tasks) {
@@ -487,6 +494,15 @@ function showOverlay(title, scoreText) {
 }
 
 // ===== 启动 =====
+function showLoadError(msg) {
+  document.getElementById('overlay').innerHTML = `
+    <h2>❌ 资源加载失败</h2>
+    <div class="hint">${msg}</div>
+    <div class="hint">检查网络后点击重试</div>
+    <button id="retry-btn">重试加载</button>`;
+  document.getElementById('retry-btn').addEventListener('click', () => location.reload());
+}
+
 (async function start() {
   try {
     await loadAssets();
@@ -499,7 +515,7 @@ function showOverlay(title, scoreText) {
     requestAnimationFrame(loop);
   } catch (e) {
     console.error('资源加载失败:', e);
-    document.getElementById('overlay').innerHTML = `<h2>❌ 资源加载失败</h2><div class="hint">${e.message}</div><div class="hint">请刷新页面重试 (Cmd/Ctrl + Shift + R)</div>`;
+    showLoadError(e.message);
   }
 })();
 </script>
