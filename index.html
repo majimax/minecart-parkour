@@ -161,6 +161,7 @@ let tiles = [], nextSpawnX = 0, cameraX = 0;
 let distance = 0, speed = BASE_SPEED, elapsedMs = 0;
 let timeOfDay = 0, bgScrollX = 0;
 let gameState = 'ready';
+let lastWasGap = false;  // 上一段是否为空隙（防止连续空隙）
 
 // 在 nextSpawnX 处生成一个 land tile
 function spawnTileAt(x, img) {
@@ -175,17 +176,18 @@ function spawnTileAt(x, img) {
 // 3) 否则正常生成
 function spawnNext() {
   const pick = ASSETS.land[Math.floor(Math.random() * ASSETS.land.length)];
-  // width ≤ 128 即 land_1_1 (64) 和 land_1_2 (128)
-  if (pick.width <= 128 && Math.random() < DELETE_PROB) {
-    // 删掉 = 不生成 tile，但 nextSpawnX 推进（空隙宽度 = 该 tile 应有宽度）
-    nextSpawnX += pick.width;
+  // 只 land_1_1 (64px) 可被删；且上一段不能是空隙（防止连续空隙形成超大间隔）
+  if (pick === ASSETS.land[0] && !lastWasGap && Math.random() < DELETE_PROB) {
+    nextSpawnX += pick.width;  // 跳过 spawn，留 64px 空隙
+    lastWasGap = true;
     return;
   }
   spawnTileAt(nextSpawnX, pick);
+  lastWasGap = false;
 }
 
 function initMap() {
-  tiles = []; nextSpawnX = 0;
+  tiles = []; nextSpawnX = 0; lastWasGap = false;
   // 起步 4 段 land，给玩家缓冲
   for (let i = 0; i < 4; i++) {
     const img = ASSETS.land[Math.floor(Math.random() * ASSETS.land.length)];
