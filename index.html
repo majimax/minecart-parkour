@@ -74,8 +74,10 @@ const PLAYER_TARGET_W = 36;        // 角色目标宽度
 const STAGE_DIST = [0, 200, 500, 1000, 2000, 3500, 6000];  // 角色升级距离
 const CAMERA_Y = LAYER_GROUND - H + 30;
 
-// 删 land_1_1 / land_1_2 的概率（剩下 70% 正常生成）
+// 删 land_1_1 的概率（剩下 70% 正常生成）
 const DELETE_PROB = 0.30;
+// 空隙固定宽度（比跳跃水平距离 100px 小很多，确保从 land 任意位置都能跳过）
+const GAP_WIDTH = 32;
 
 // ===== 资源 =====
 const ASSETS = {
@@ -172,13 +174,14 @@ function spawnTileAt(x, img) {
 
 // 决定下一个 tile：
 // 1) 随机从 4 个 land_1_* 中选一个
-// 2) 如果选到 land_1_1 (64px) 或 land_1_2 (128px)，有 30% 概率"删掉" → 留空隙
-// 3) 否则正常生成
+// 2) 如果选到 land_1_1 (64px) 有 30% 概率"删掉" → 留 32px 空隙
+// 3) 连续两段不会被删（lastWasGap 保护）
+// 4) 否则正常生成
 function spawnNext() {
   const pick = ASSETS.land[Math.floor(Math.random() * ASSETS.land.length)];
-  // 只 land_1_1 (64px) 可被删；且上一段不能是空隙（防止连续空隙形成超大间隔）
+  // 只 land_1_1 (64px) 可被删；且上一段不能是空隙
   if (pick === ASSETS.land[0] && !lastWasGap && Math.random() < DELETE_PROB) {
-    nextSpawnX += pick.width;  // 跳过 spawn，留 64px 空隙
+    nextSpawnX += GAP_WIDTH;  // 跳过 spawn，留 32px 空隙
     lastWasGap = true;
     return;
   }
