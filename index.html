@@ -93,14 +93,26 @@ const ASSETS = {
   trap2: []                  // trap_2_1, trap_2_2 高台吊刺（朝下）
 };
 
-function loadImage(src, timeoutMs = 8000) {
+function loadImage(src, timeoutMs = 30000) {
   return new Promise((res, rej) => {
     const i = new Image();
-    const timer = setTimeout(() => rej(new Error('加载超时: ' + src)), timeoutMs);
+    const timer = setTimeout(() => rej(new Error(`加载超时 (${timeoutMs/1000}s): ${src}`)), timeoutMs);
     i.onload = () => { clearTimeout(timer); res(i); };
-    i.onerror = () => { clearTimeout(timer); rej(new Error('无法加载: ' + src)); };
+    i.onerror = () => { clearTimeout(timer); rej(new Error(`加载失败: ${src}`)); };
     i.src = src;
   });
+}
+
+// 带重试的加载（重试 2 次 → 间隔 1s）
+async function loadImageWithRetry(src, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await loadImage(src);
+    } catch (e) {
+      if (i === retries) throw e;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
 }
 
 let _loadCount = 0;
@@ -137,11 +149,21 @@ async function loadAssets() {
   tasks.push({ src: `${b}land/trap_2_2.png?v=${_v}`, onDone: img => ASSETS.trap2.push(img) });
 
   document.getElementById('load-total').textContent = tasks.length;
-  for (const t of tasks) {
-    const img = await loadImage(t.src);
-    t.onDone(img);
-    await reportProgress(tasks.length);
-  }
+
+  // 并行加载所有资源（带重试），总耗时 = 最慢一张的时间
+  let done = 0;
+  const settled = await Promise.allSettled(
+    tasks.map(async t => {
+      const img = await loadImageWithRetry(t.src);
+      t.onDone(img);
+      done++;
+      document.getElementById('load-count').textContent = done;
+      document.getElementById('load-bar-fill').style.width = (done / tasks.length * 100).toFixed(1) + '%';
+    })
+  );
+  // 任何一个失败都抛错
+  const failed = settled.find(s => s.status === 'rejected');
+  if (failed) throw failed.reason;
 }
 
 // ===== 玩家 =====
@@ -495,12 +517,16 @@ function showOverlay(title, scoreText) {
 
 // ===== 启动 =====
 function showLoadError(msg) {
-  document.getElementById('overlay').innerHTML = `
+  const o = document.getElementById('overlay');
+  o.innerHTML = `
     <h2>❌ 资源加载失败</h2>
     <div class="hint">${msg}</div>
-    <div class="hint">检查网络后点击重试</div>
-    <button id="retry-btn">重试加载</button>`;
+    <div class="hint">网络问题或 GitHub Pages 访问受限（国内可能受 GitHub CDN 限制）</div>
+    <div class="hint">试试：1) 硬刷新  2) 换网络  3) 直接下载 ZIP 本地打开</div>
+    <button id="retry-btn">重试加载</button>
+    <button id="github-btn" style="background:linear-gradient(180deg,#666,#333)">下载源码</button>`;
   document.getElementById('retry-btn').addEventListener('click', () => location.reload());
+  document.getElementById('github-btn').addEventListener('click', () => window.open('https://github.com/majimax/minecart-parkour', '_blank'));
 }
 
 (async function start() {
