@@ -199,11 +199,14 @@ class Tile{
   get bottom(){return this.y+this.h}
   isSafeTop(){return this.type==='ground'||this.type==='high'}
   getDamageBox(camX){
-    if(this.type==='trap1')return{x:this.left-camX,y:this.top,w:this.w,h:this.h};
-    if(this.type==='trap2')return{x:this.left-camX,y:this.bottom-24,w:this.w,h:24};
-    if(this.type==='high_trap_up')return{x:this.left-camX,y:this.top,w:this.w,h:Math.min(16,this.h)};
-    // high_trap_down: 尖刺在 high tile 下方外侧（玩家踩 high 上没事，从地面跳起撞才 die）
-    if(this.type==='high_trap_down')return{x:this.left-camX,y:this.bottom,w:this.w,h:24};
+    // trap1：尖刺在图像顶部，伤害盒只覆盖刺（顶部 12px），基座安全
+    if(this.type==='trap1')return{x:this.left-camX,y:this.top,w:this.w,h:12};
+    // trap2：尖刺在图像底部，伤害盒只覆盖刺（底部 12px），顶部基座安全
+    if(this.type==='trap2')return{x:this.left-camX,y:this.bottom-12,w:this.w,h:12};
+    // high_trap_up：尖刺在 high tile 顶部，伤害盒只覆盖顶部 8px 刺
+    if(this.type==='high_trap_up')return{x:this.left-camX,y:this.top,w:this.w,h:8};
+    // high_trap_down：尖刺在图像底部，伤害盒只覆盖底部 12px 刺
+    if(this.type==='high_trap_down')return{x:this.left-camX,y:this.bottom-12,w:this.w,h:12};
     return null;
   }
 }
