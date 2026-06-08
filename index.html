@@ -517,16 +517,9 @@ function showOverlay(title, scoreText) {
 
 // ===== 启动 =====
 function showLoadError(msg) {
-  const o = document.getElementById('overlay');
-  o.innerHTML = `
+  document.getElementById('overlay').innerHTML = `
     <h2>❌ 资源加载失败</h2>
-    <div class="hint">${msg}</div>
-    <div class="hint">网络问题或 GitHub Pages 访问受限（国内可能受 GitHub CDN 限制）</div>
-    <div class="hint">试试：1) 硬刷新  2) 换网络  3) 直接下载 ZIP 本地打开</div>
-    <button id="retry-btn">重试加载</button>
-    <button id="github-btn" style="background:linear-gradient(180deg,#666,#333)">下载源码</button>`;
-  document.getElementById('retry-btn').addEventListener('click', () => location.reload());
-  document.getElementById('github-btn').addEventListener('click', () => window.open('https://github.com/majimax/minecart-parkour', '_blank'));
+    <div class="hint">${msg}</div>`;
 }
 
 (async function start() {
