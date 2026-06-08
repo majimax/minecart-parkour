@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<base href="./">
+<title>🚃 矿车跑酷</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  width:100%;height:100%;
+  background:#0a0a1a;
+  overflow:hidden;
+  font-family:-apple-system,"PingFang SC",sans-serif;
+  user-select:none;-webkit-user-select:none;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+body{
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  min-height:100vh;min-height:100dvh;
+  padding:8px;
+}
+#wrap{
+  position:relative;
+  width:100%;
+  max-width:768px;
+  aspect-ratio:768/624;
+  box-shadow:0 0 60px rgba(120,200,255,.3);
+  border-radius:8px;
+  overflow:hidden;
+  background:#000;
+  max-height:calc(100vh - 16px);
+  max-height:calc(100dvh - 16px);
+}
+canvas{
+  display:block;
+  width:100%;height:100%;
+  image-rendering:pixelated;
+  image-rendering:crisp-edges;
+}
+#hud{
+  position:absolute;top:0;left:0;right:0;
+  padding:max(6px, 1.5cqh) max(10px, 2cqw);
+  display:flex;justify-content:space-between;align-items:center;
+  color:#fff;font-size:clamp(11px, 2.2cqw, 16px);
+  font-weight:bold;
+  text-shadow:2px 2px 0 #000,-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000;
+  pointer-events:none;z-index:10;
+}
+.hud-item{display:flex;align-items:center;gap:5px}
+.hud-value{color:#ffeb3b;font-size:clamp(14px, 3cqw, 20px)}
+#overlay{
+  position:absolute;inset:0;
+  background:rgba(0,0,0,.72);
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  color:#fff;z-index:20;gap:14px;
+  padding:20px;text-align:center;
+}
+#overlay h1{font-size:clamp(22px,5cqw,36px);color:#ffeb3b;text-shadow:3px 3px 0 #d32f2f;margin:0;letter-spacing:2px}
+#overlay h2{font-size:clamp(22px,5cqw,36px);color:#ff5252;text-shadow:3px 3px 0 #000;margin:0}
+#overlay .score{font-size:clamp(14px,3cqw,20px);color:#fff}
+#overlay .score span{color:#ffeb3b;font-size:clamp(20px,4.5cqw,28px);margin-left:6px}
+#overlay button{
+  padding:clamp(10px,2.5cqw,14px) clamp(24px,6cqw,36px);
+  font-size:clamp(14px,3.2cqw,20px);
+  font-weight:bold;color:#fff;
+  background:linear-gradient(180deg,#ff7043,#d84315);
+  border:3px solid #fff;border-radius:8px;
+  cursor:pointer;
+  box-shadow:0 4px 0 #b71c1c,0 6px 12px rgba(0,0,0,.4);
+  transition:transform .1s,box-shadow .1s;
+}
+#overlay button:hover{transform:translateY(-2px);box-shadow:0 6px 0 #b71c1c,0 8px 16px rgba(0,0,0,.5)}
+#overlay button:active{transform:translateY(2px);box-shadow:0 2px 0 #b71c1c,0 3px 6px rgba(0,0,0,.4)}
+.hint{font-size:clamp(11px,2.4cqw,14px);color:#ccc;max-width:560px;line-height:1.5}
+.key{display:inline-block;padding:1px 8px;background:#fff;color:#333;border-radius:3px;font-weight:bold;margin:0 2px;font-family:monospace;font-size:clamp(10px,2cqw,13px)}
+.hidden{display:none!important}
+#mobile-btn{
+  position:absolute;bottom:max(12px,2cqh);right:max(12px,2cqw);
+  width:clamp(60px,12cqw,90px);height:clamp(60px,12cqw,90px);
+  border-radius:50%;
+  background:rgba(255,255,255,.18);
+  border:3px solid rgba(255,255,255,.6);
+  color:#fff;font-size:clamp(12px,2.4cqw,16px);font-weight:bold;
+  display:none;align-items:center;justify-content:center;
+  z-index:5;touch-action:none;
+}
+@media (hover:none) and (pointer:coarse){#mobile-btn{display:flex}}
+#loading{display:flex;flex-direction:column;align-items:center;gap:10px;width:80%;max-width:380px}
+.load-text{color:#fff;font-size:clamp(12px,2.6cqw,15px);font-weight:bold}
+.load-text span{color:#ffeb3b;font-size:clamp(14px,3cqw,18px)}
+.load-bar{width:100%;height:clamp(12px,2.5cqw,18px);background:rgba(0,0,0,.5);border:2px solid #fff;border-radius:10px;overflow:hidden;box-shadow:0 0 8px rgba(255,235,59,.3)}
+#load-bar-fill{height:100%;width:0%;background:linear-gradient(90deg,#ffeb3b,#ff7043);transition:width .15s ease-out;box-shadow:0 0 6px rgba(255,235,59,.6)}
+.load-hint{color:#aaa;font-size:clamp(10px,2cqw,12px);margin-top:4px}
+.load-spin{display:inline-block;animation:spin 1s linear infinite}
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="256" height="208"></canvas>
+  <div id="hud">
+    <div class="hud-item">🏃 <span id="dist" class="hud-value">0</span>m</div>
+    <div class="hud-item">🚃 <span id="stage" class="hud-value">1/7</span></div>
+    <div class="hud-item">⚡ <span id="speed" class="hud-value">1.0x</span></div>
+  </div>
+  <div id="overlay">
+    <h1>🚃 矿车跑酷</h1>
+    <div id="loading">
+      <div class="load-text"><span class="load-spin">⏳</span> 加载中 <span id="load-count">0</span> / <span id="load-total">26</span></div>
+      <div class="load-bar"><div id="load-bar-fill"></div></div>
+      <div class="load-hint">首次加载请稍候，资源会缓存</div>
+    </div>
+    <div id="game-intro" class="hidden">
+      <div class="hint">矿车自动前进 · <b>点击/空格 = 直接跳跃</b></div>
+      <div class="hint">跑得越快矿车越大 · 体型大更易撞尖刺</div>
+      <div class="hint"><b>2 层地图</b>：地面层持续连接，地刺出现时跳上高台绕行</div>
+    </div>
+    <button id="start-btn" class="hidden">开始游戏</button>
+  </div>
+  <button id="mobile-btn">跳跃</button>
+</div>
+<script>
+const W=256,H=208;
+const GRAVITY=0.3;
+const JUMP_POWER=-7.5;
+const BASE_SPEED=2.0,SPEED_INC=0.0008,MAX_SPEED=5.5;
+const LAYER_GROUND=180;
+const LAYER_HIGH=110;
+const LAYER_NAME=['高台','地面'];
+const PLAYER_TARGET_W=36;
+const STAGE_SPEED_THRESHOLDS=[1.0,1.25,1.5,1.75,2.0,2.25,2.5];
+const CAMERA_Y=LAYER_GROUND-H+30;
+
+const ASSETS={role:[],bg:{day:[],eve:[],night:[]},land:[],landH:[],trap1:[],trap2:[]};
+
+function loadImage(src){
+  return new Promise((res,rej)=>{
+    const i=new Image();
+    i.onload=()=>res(i);
+    i.onerror=()=>rej(new Error('无法加载: '+src));
+    i.src=src;
+  });
+}
+
+let _loadCount=0;
+async function reportProgress(total){
+  _loadCount++;
+  document.getElementById('load-count').textContent=_loadCount;
+  document.getElementById('load-bar-fill').style.width=(_loadCount/total*100).toFixed(1)+'%';
+}
+
+async function loadAssets(){
+  const b='assets/';
+  const tasks=[];
+  for(let i=1;i<=7;i++)tasks.push({src:`${b}role/role_${i}.png`,onDone:i=>{ASSETS.role.push(i)}});
+  for(const p of['day','eve','night']){
+    tasks.push({src:`${b}bg/bg_1_${p}.png`,onDone:i=>{ASSETS.bg[p][0]=i}});
+    tasks.push({src:`${b}bg/bg_2_${p}.png`,onDone:i=>{ASSETS.bg[p][1]=i}});
+  }
+  for(let i=1;i<=5;i++)tasks.push({src:`${b}land/land_1_${i}.png`,onDone:i2=>{ASSETS.land.push(i2)}});
+  for(let i=1;i<=3;i++)tasks.push({src:`${b}land/land_H_${i}.png`,onDone:i2=>{ASSETS.landH.push(i2)}});
+  for(let i=1;i<=3;i++)tasks.push({src:`${b}land/trap_1_${i}.png`,onDone:i2=>{ASSETS.trap1.push(i2)}});
+  tasks.push({src:`${b}land/trap_2_1.png`,onDone:i=>{ASSETS.trap2.push(i)}});
+  tasks.push({src:`${b}land/trap_2_2.png`,onDone:i=>{ASSETS.trap2.push(i)}});
+  document.getElementById('load-total').textContent=tasks.length;
+  for(const t of tasks){
+    const img=await loadImage(t.src);
+    t.onDone(img);
+    await reportProgress(tasks.length);
+  }
+}
+
+const player={
+  x:50,y:LAYER_GROUND,vy:0,onGround:true,currentLayer:1,
+  stage:0,boxW:0,boxH:0,
+  get boxX(){return this.x-this.boxW/2},
+  get boxY(){return this.y-this.boxH},
+  updateBox(){
+    const img=ASSETS.role[this.stage];
+    const scale=PLAYER_TARGET_W/img.width;
+    this.boxW=PLAYER_TARGET_W;
+    this.boxH=img.height*scale;
+  }
+};
+
+class Tile{
+  constructor(x,y,type,img){
+    this.x=x;this.y=y;this.type=type;this.img=img;
+    this.w=img.width;this.h=img.height;
+    this.layer=(y===LAYER_HIGH)?0:1;
+  }
+  get left(){return this.x-this.w/2}
+  get right(){return this.x+this.w/2}
+  get top(){return this.y}
+  get bottom(){return this.y+this.h}
+  isSafeTop(){return this.type==='ground'||this.type==='high'}
+  getDamageBox(camX){
+    if(this.type==='trap1')return{x:this.left-camX,y:this.top,w:this.w,h:this.h};
+    if(this.type==='trap2')return{x:this.left-camX,y:this.bottom-24,w:this.w,h:24};
+    if(this.type==='high_trap_up')return{x:this.left-camX,y:this.top,w:this.w,h:Math.min(16,this.h)};
+    // high_trap_down: 尖刺在 high tile 下方外侧（玩家踩 high 上没事，从地面跳起撞才 die）
+    if(this.type==='high_trap_down')return{x:this.left-camX,y:this.bottom,w:this.w,h:24};
+    return null;
+  }
+}
+
+let tiles=[],nextSpawnX=0,cameraX=0;
+let distance=0,speed=BASE_SPEED,elapsedMs=0;
+let timeOfDay=0,bgScrollX={far:0,near:0},gameState='ready';
+let landStreak=0,trapStreak=0;
+
+function pickFrom(arr){return arr[Math.floor(Math.random()*arr.length)]}
+
+function spawnTileAt(x,layerType,kind,img){
+  let type;
+  if(layerType==='ground'){
+    if(kind==='ground')type='ground';
+    else type='trap1';
+  }else{
+    if(kind==='high')type='high';
+    else if(kind==='high_trap_up')type='high_trap_up';
+    else type='high_trap_down';
+  }
+  const y=(layerType==='ground')?LAYER_GROUND:LAYER_HIGH;
+  const t=new Tile(x+img.width/2,y,type,img);
+  tiles.push(t);
+  if(layerType==='ground'){
+    nextSpawnX=x+img.width;
+  }else{
+    nextSpawnX=Math.max(nextSpawnX,x+1);
+  }
+}
+
+// 按 speedRatio 选 trap 池（前期短，后期长）
+function getTrapPool(){
+  const r=speed/BASE_SPEED;
+  if(r<1.4)return[ASSETS.trap1[0]];                              // 起步期：只用 64
+  if(r<2.0)return[ASSETS.trap1[0],ASSETS.trap1[1]];              // 加速期：64+128
+  return ASSETS.trap1;                                            // 极限期：64+128+160 全开
+}
+
+// 按随机数选高台类型（60% 安全 / 20% 上刺 / 20% 下刺）
+function getHighSpec(){
+  const r=Math.random();
+  if(r<0.6)return{kind:'high',pool:ASSETS.landH};
+  if(r<0.8)return{kind:'high_trap_up',pool:ASSETS.landH};
+  return{kind:'high_trap_down',pool:ASSETS.trap2};
+}
+
+function getLandInterval(){
+  // 速度越快，land 之间间隔越短
+  const r=speed/BASE_SPEED;
+  if(r<1.4)return 4+Math.floor(Math.random()*3);  // 起步期 4~6 段（多 land 缓冲）
+  if(r<2.0)return 2+Math.floor(Math.random()*3);  // 加速期 2~4 段
+  return 1+Math.floor(Math.random()*3);            // 极限期 1~3 段
+}
+
+function getHighChance(){
+  // 速度越快，高台陷阱出现率越高
+  const r=speed/BASE_SPEED;
+  if(r<1.4)return 0.20;
+  if(r<2.0)return 0.30;
+  return 0.40;
+}
+
+function spawnNext(){
+  // ① 决定地面段类型
+  const useTrap=trapStreak===0 && landStreak>=getLandInterval();
+  const kind=useTrap?'trap1':'ground';
+  const pool=useTrap?getTrapPool():ASSETS.land;
+  const groundImg=pool[Math.floor(Math.random()*pool.length)];
+  spawnTileAt(nextSpawnX,'ground',kind,groundImg);
+
+  if(useTrap){trapStreak=1;landStreak=0;}
+  else{landStreak++;trapStreak=0;}
+
+  // ② 决定是否配高台：trap 必配，长 trap (160) 必配带 land 的高台
+  const isLongTrap=groundImg.width>=160;
+  const needHigh=useTrap || Math.random()<getHighChance();
+
+  if(needHigh){
+    const spec=getHighSpec();
+    // 长 trap 时高台强制普通 land（必须给玩家留可走的路）
+    const finalSpec=isLongTrap ? {kind:'high',pool:ASSETS.landH} : spec;
+    const himg=finalSpec.pool[Math.floor(Math.random()*finalSpec.pool.length)];
+
+    // 高台位置：覆盖在地面 trap 区域上方（high.left ≈ ground.left - 20）
+    const hx=nextSpawnX-groundImg.width-20-Math.floor(Math.random()*30);
+    spawnTileAt(hx,'high',finalSpec.kind,himg);
+  }
+}
+
+function initMap(){
+  tiles=[];nextSpawnX=0;landStreak=0;trapStreak=0;
+  // 起步 4 段 land，给玩家充分缓冲
+  spawnTileAt(0,'ground','ground',ASSETS.land[4]);  // 224px
+  for(let i=0;i<3;i++){
+    const img=ASSETS.land[Math.floor(Math.random()*ASSETS.land.length)];
+    spawnTileAt(nextSpawnX,'ground','ground',img);
+  }
+  // 4 段起步后 nextSpawnX ≈ 450-700，视野内始终有 2-3 段
+}
+
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+ctx.imageSmoothingEnabled=false;
+
+function jump(){
+  if(gameState!=='playing'||!player.onGround)return;
+  player.vy=JUMP_POWER;
+  player.onGround=false;
+  player.jumping=true;
+}
+
+function handlePrimary(){
+  if(gameState==='ready'){startGame();return}
+  if(gameState==='dead'){restart();return}
+  jump();
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){e.preventDefault();handlePrimary()}
+});
+canvas.addEventListener('mousedown',e=>{e.preventDefault();handlePrimary()});
+canvas.addEventListener('touchstart',e=>{e.preventDefault();handlePrimary()},{passive:false});
+document.getElementById('start-btn').addEventListener('click',()=>{
+  if(gameState==='ready')startGame();else if(gameState==='dead')restart();
+});
+const mb=document.getElementById('mobile-btn');
+mb.addEventListener('touchstart',e=>{e.preventDefault();handlePrimary()},{passive:false});
+
+function isOverSafeTile(){
+  const pL=player.boxX,pR=player.boxX+player.boxW;
+  for(const t of tiles){
+    if(!t.isSafeTop())continue;
+    const L=t.left-cameraX,R=t.right-cameraX;
+    if(pR<=L+3||pL>=R-3)continue;
+    if(Math.abs(player.y-t.top)<3)return true;
+  }
+  return false;
+}
+function checkLanding(prevBottom){
+  const pL=player.boxX,pR=player.boxX+player.boxW,pB=player.y;
+  for(const t of tiles){
+    // 踩到尖刺 tile (trap1 / high_trap_up 顶部刺)：立即失败
+    if(t.type==='trap1'||t.type==='high_trap_up'){
+      const L=t.left-cameraX,R=t.right-cameraX;
+      if(pR<=L+1||pL>=R-1)continue;
+      if(prevBottom<=t.top+1&&pB>=t.top-1){
+        die();return false;
+      }
+      continue;
+    }
+    if(!t.isSafeTop())continue;
+    const L=t.left-cameraX,R=t.right-cameraX;
+    if(pR<=L+3||pL>=R-3)continue;
+    if(prevBottom<=t.top+2&&pB>=t.top){
+      player.y=t.top;player.vy=0;player.onGround=true;player.jumping=false;
+      player.currentLayer=t.layer;
+      return true;
+    }
+  }
+  return false;
+}
+function checkDamage(){
+  // AABB 严格重叠检查（边界接触即不算重叠）
+  const px=player.boxX,py=player.boxY,pw=player.boxW,ph=player.boxH;
+  for(const t of tiles){
+    const d=t.getDamageBox(cameraX);
+    if(!d)continue;
+    if(px+pw<=d.x||px>=d.x+d.w)continue;
+    if(py+ph<=d.y||py>=d.y+d.h)continue;
+    return true;
+  }
+  return false;
+}
+
+function update(){
+  if(gameState!=='playing')return;
+  const now=performance.now();
+  const dtMs=Math.min(50,now-(update._last||now));
+  update._last=now;
+  elapsedMs+=dtMs;
+
+  distance+=speed/10;
+  speed=Math.min(MAX_SPEED,BASE_SPEED+distance*SPEED_INC);
+
+  const speedRatio=speed/BASE_SPEED;
+  let newStage=0;
+  for(let i=0;i<STAGE_SPEED_THRESHOLDS.length;i++){
+    if(speedRatio>=STAGE_SPEED_THRESHOLDS[i])newStage=i;
+  }
+  if(newStage!==player.stage){player.stage=newStage;player.updateBox()}
+
+  bgScrollX.far-=speed*.2;bgScrollX.near-=speed*.5;
+  if(bgScrollX.far<=-256)bgScrollX.far+=256;
+  if(bgScrollX.near<=-256)bgScrollX.near+=256;
+  const newTime=Math.floor(distance/500)%3;
+  if(newTime!==timeOfDay)timeOfDay=newTime;
+
+  if(player.onGround&&!isOverSafeTile()){
+    player.onGround=false;player.jumping=true;player.vy=0;
+  }
+  if(!player.onGround){
+    const prevBottom=player.y;
+    player.vy+=GRAVITY;player.y+=player.vy;
+    checkLanding(prevBottom);
+  }
+  if(player.y>LAYER_GROUND+200){die();return}
+  if(checkDamage()){die();return}
+
+  cameraX+=speed;
+  tiles=tiles.filter(t=>t.right>cameraX-50&&t.left<cameraX+W+100);
+  // 持续生成新 tile（视野右边 100px 外就生成新路，玩家视觉"前方有路"）
+  let _safety=0;
+  while(nextSpawnX<cameraX+W+100){
+    spawnNext();
+    if(++_safety>30)break;
+  }
+}
+
+function w2sY(y){return y-CAMERA_Y}
+
+function drawBg(){
+  const period=['day','eve','night'][timeOfDay];
+  const bgs=ASSETS.bg[period];
+  for(let x=bgScrollX.far;x<W;x+=256)ctx.drawImage(bgs[0],x,0);
+  ctx.globalAlpha=.55;
+  for(let x=bgScrollX.near;x<W;x+=256)ctx.drawImage(bgs[1],x,0);
+  ctx.globalAlpha=1;
+}
+
+function drawLayerGuides(){
+  ctx.save();
+  ctx.strokeStyle='rgba(255,255,255,.18)';
+  ctx.lineWidth=1;ctx.setLineDash([3,5]);
+  for(const y of [LAYER_GROUND,LAYER_HIGH]){
+    const sy=w2sY(y);
+    ctx.beginPath();ctx.moveTo(0,sy-4);ctx.lineTo(W,sy-4);ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawTiles(){
+  for(const t of tiles){
+    const L=t.left-cameraX,R=t.right-cameraX;
+    const topY=w2sY(t.top),botY=w2sY(t.bottom);
+    if(R<-10||L>W+10)continue;
+    if(botY<-30||topY>H+30)continue;
+    ctx.drawImage(t.img,L,topY);
+  }
+}
+
+function drawPlayer(){
+  const img=ASSETS.role[player.stage];
+  const scale=PLAYER_TARGET_W/img.width;
+  const drawW=PLAYER_TARGET_W,drawH=img.height*scale;
+  const px=player.x-drawW/2;
+  const py=w2sY(player.y)-drawH;
+  ctx.drawImage(img,px,py,drawW,drawH);
+}
+
+function drawHUD(){
+  document.getElementById('dist').textContent=Math.floor(distance);
+  document.getElementById('stage').textContent=`${player.stage+1}/7`;
+  document.getElementById('speed').textContent=(speed/BASE_SPEED).toFixed(2)+'x';
+}
+
+function render(){
+  ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+  drawBg();
+  drawLayerGuides();
+  drawTiles();
+  drawPlayer();
+}
+
+let lastTime=0;
+function loop(now){lastTime=now;update();render();drawHUD();requestAnimationFrame(loop)}
+
+function startGame(){
+  document.getElementById('overlay').classList.add('hidden');
+  gameState='playing';
+  player.updateBox();
+}
+
+function restart(){
+  player.x=50;player.y=LAYER_GROUND;player.vy=0;player.onGround=true;
+  player.currentLayer=1;player.stage=0;
+  player.updateBox();
+  distance=0;speed=BASE_SPEED;cameraX=0;
+  timeOfDay=0;bgScrollX={far:0,near:0};elapsedMs=0;
+  initMap();
+  document.getElementById('overlay').classList.add('hidden');
+  gameState='playing';
+}
+
+function die(){
+  gameState='dead';
+  showOverlay('💥 翻车了！',`${Math.floor(distance)}m · 体型 ${player.stage+1}/7`);
+}
+
+function showOverlay(title,scoreText){
+  const o=document.getElementById('overlay');
+  o.innerHTML=`<h2>${title}</h2><div class="score">${scoreText}</div><button id="start-btn">再来一局</button>`;
+  o.classList.remove('hidden');
+  document.getElementById('start-btn').addEventListener('click',restart);
+}
+
+(async function start(){
+  try{
+    await loadAssets();
+    player.updateBox();
+    initMap();
+    render();
+    // 隐藏 loading，显示开始按钮
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('game-intro').classList.remove('hidden');
+    document.getElementById('start-btn').classList.remove('hidden');
+    requestAnimationFrame(loop);
+  }catch(e){
+    console.error('资源加载失败:',e);
+    document.getElementById('overlay').innerHTML=`<h2>❌ 资源加载失败</h2><div class="hint">${e.message}</div><div class="hint">请刷新页面重试 (Cmd/Ctrl + Shift + R)</div>`;
+  }
+})();
+</script>
+</body>
+</html>
