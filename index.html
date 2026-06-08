@@ -48,14 +48,14 @@ canvas{display:block;width:100%;height:100%;image-rendering:pixelated;image-rend
   <div id="overlay">
     <h1>🚃 矿车跑酷</h1>
     <div id="loading">
-      <div class="load-text"><span class="load-spin">⏳</span> 加载中 <span id="load-count">0</span> / <span id="load-total">15</span></div>
+      <div class="load-text"><span class="load-spin">⏳</span> 加载中 <span id="load-count">0</span> / <span id="load-total">17</span></div>
       <div class="load-bar"><div id="load-bar-fill"></div></div>
       <div class="load-hint">首次加载请稍候，资源会缓存</div>
     </div>
     <div id="game-intro" class="hidden">
       <div class="hint">矿车自动前进 · <b>点击/空格 = 跳跃</b></div>
-      <div class="hint">路上有 <b>空隙</b>（48px 宽）和 <b>陷阱</b>（刺朝上）</div>
-      <div class="hint">掉进空隙 / 踩到刺 = <b>Game Over</b></div>
+      <div class="hint">路上有 <b>空隙</b>（48px）、<b>地刺</b>（朝上）、<b>高台</b></div>
+      <div class="hint">高台上有 <b>吊刺</b>（朝下）— 站在上面没事，撞刺就死</div>
     </div>
     <button id="start-btn" class="hidden">开始游戏</button>
   </div>
@@ -77,6 +77,7 @@ const CAMERA_Y = LAYER_GROUND - H + 30;
 // 删 land_1_1 的概率（剩下 70% 正常生成）
 const TRAP_PROB = 0.25;  // land_1_1 被 trap_1_1 替换的概率
 const GAP_PROB  = 0.25;  // land_1_1 被删掉变空隙的概率
+const HIGH_CHANCE = 0.30;  // 每段 ground 之上 spawn 一段 high 的概率
 // 空隙固定宽度（> 玩家 box 宽度 36px，确保站在空隙上会掉下去）
 const GAP_WIDTH = 48;
 
@@ -85,7 +86,8 @@ const ASSETS = {
   role: [],                  // 7 个角色
   bg: { day: null, eve: null, night: null },
   land: [],                  // land_1_1 ~ land_1_4 共 4 个
-  trap1: []                  // trap_1_1 供替换
+  trap1: [],                 // trap_1_1 地面刺（朝上）
+  trap2: []                  // trap_2_1, trap_2_2 高台吊刺（朝下）
 };
 
 function loadImage(src) {
@@ -122,8 +124,10 @@ async function loadAssets() {
   for (let i = 1; i <= 4; i++) {
     tasks.push({ src: `${b}land/land_1_${i}.png`, onDone: img => ASSETS.land.push(img) });
   }
-  // 陷阱 trap_1_1（只加载一张用于替换 land_1_1）
+  // 陷阱 trap_1_1（地面刺朝上）+ trap_2_1, trap_2_2（高台吊刺朝下）
   tasks.push({ src: `${b}land/trap_1_1.png`, onDone: img => ASSETS.trap1.push(img) });
+  tasks.push({ src: `${b}land/trap_2_1.png`, onDone: img => ASSETS.trap2.push(img) });
+  tasks.push({ src: `${b}land/trap_2_2.png`, onDone: img => ASSETS.trap2.push(img) });
 
   document.getElementById('load-total').textContent = tasks.length;
   for (const t of tasks) {
@@ -156,62 +160,105 @@ class Tile {
     this.img = img;
     this.w = img.width;
     this.h = img.height;
-    this.type = type; // 'land' or 'trap'
+    this.type = type; // 'land' | 'trap' (地面刺朝上) | 'trap2' (高台吊刺朝下)
   }
   get left()   { return this.x - this.w / 2; }
   get right()  { return this.x + this.w / 2; }
   get top()    { return this.y; }
   get bottom() { return this.y + this.h; }
   isSafeTop() { return this.type === 'land'; }
+  // 返回伤害盒（仅 trap2 有）
+  getDamageBox(camX) {
+    if (this.type === 'trap2') {
+      // trap_2 刺在底部 12px（图像底部那一排尖刺）
+      return { x: this.left - camX, y: this.bottom - 12, w: this.w, h: 12 };
+    }
+    return null;
+  }
 }
 
 let tiles = [], nextSpawnX = 0, cameraX = 0;
+let highNextSpawnX = 0, highLastWasGap = false;  // 第二层独立推进
 let distance = 0, speed = BASE_SPEED, elapsedMs = 0;
 let timeOfDay = 0, bgScrollX = 0;
 let gameState = 'ready';
 let lastWasGap = false;  // 上一段是否为空隙（防止连续空隙）
 
-// 在 nextSpawnX 处生成一个 tile
-function spawnTileAt(x, img, type = 'land') {
-  const t = new Tile(x + img.width / 2, LAYER_GROUND, img, type);
+// 在 (x, y) 处生成一个 tile（默认 ground layer）
+function spawnTileAt(x, img, type = 'land', layer = LAYER_GROUND) {
+  const t = new Tile(x + img.width / 2, layer, img, type);
   tiles.push(t);
+  return { newNextSpawnX: x + img.width, tile: t };
+}
+
+function _spawnGround(x, img, type) {
+  spawnTileAt(x, img, type, LAYER_GROUND);
   nextSpawnX = x + img.width;
 }
 
-// 决定下一个 tile：
-// 1) 随机从 4 个 land_1_* 中选一个
-// 2) 如果选到 land_1_1 (64px)：
-//    - 25% 概率替换成 trap_1_1（踩上去失败）
-//    - 25% 概率删掉（变 48px 空隙）
-//    - 50% 概率正常 land_1_1
-// 3) 连续两段空隙不会出现（lastWasGap 保护）
-// 4) 其他 land (1_2/1_3/1_4) 100% 正常生成
+function _spawnHigh(x, img, type) {
+  spawnTileAt(x, img, type, LAYER_HIGH);
+  highNextSpawnX = x + img.width;
+}
+
+// 决定下一个 ground tile
 function spawnNext() {
   const pick = ASSETS.land[Math.floor(Math.random() * ASSETS.land.length)];
+  let spawned = false;
   if (pick === ASSETS.land[0] && !lastWasGap) {
     const r = Math.random();
     if (r < TRAP_PROB) {
-      // trap_1_1 替换 land_1_1
-      spawnTileAt(nextSpawnX, ASSETS.trap1[0], 'trap');
-      lastWasGap = false;
-      return;
+      _spawnGround(nextSpawnX, ASSETS.trap1[0], 'trap');
+      lastWasGap = false; spawned = true;
     } else if (r < TRAP_PROB + GAP_PROB) {
-      // 删掉：留 48px 空隙
       nextSpawnX += GAP_WIDTH;
       lastWasGap = true;
+      // GAP 处不 spawn ground，但 high 仍可能生成
+    } else {
+      _spawnGround(nextSpawnX, pick, 'land');
+      lastWasGap = false; spawned = true;
+    }
+  } else {
+    _spawnGround(nextSpawnX, pick, 'land');
+    lastWasGap = false; spawned = true;
+  }
+  // 30% 概率同时 spawn 一段 high（独立规则，独立位置推进）
+  if (Math.random() < HIGH_CHANCE) spawnHighNext();
+}
+
+// 决定下一个 high tile（规则同 ground，但 trap 替换为 trap_2 系列）
+function spawnHighNext() {
+  const pick = ASSETS.land[Math.floor(Math.random() * ASSETS.land.length)];
+  if (pick === ASSETS.land[0] && !highLastWasGap) {
+    const r = Math.random();
+    if (r < TRAP_PROB) {
+      // trap_2 随机选一张（trap_2_1 128px 或 trap_2_2 160px）
+      const t2 = ASSETS.trap2[Math.floor(Math.random() * ASSETS.trap2.length)];
+      _spawnHigh(highNextSpawnX, t2, 'trap2');
+      highLastWasGap = false;
+      return;
+    } else if (r < TRAP_PROB + GAP_PROB) {
+      highNextSpawnX += GAP_WIDTH;
+      highLastWasGap = true;
       return;
     }
   }
-  spawnTileAt(nextSpawnX, pick);
-  lastWasGap = false;
+  _spawnHigh(highNextSpawnX, pick, 'land');
+  highLastWasGap = false;
 }
 
 function initMap() {
-  tiles = []; nextSpawnX = 0; lastWasGap = false;
-  // 起步 4 段 land，给玩家缓冲
+  tiles = []; nextSpawnX = 0; highNextSpawnX = 0;
+  lastWasGap = false; highLastWasGap = false;
+  // 起步 4 段 ground，给玩家缓冲
   for (let i = 0; i < 4; i++) {
     const img = ASSETS.land[Math.floor(Math.random() * ASSETS.land.length)];
-    spawnTileAt(nextSpawnX, img);
+    _spawnGround(nextSpawnX, img, 'land');
+  }
+  // 起步也铺 3 段 high，让玩家一开局就能看到第二层
+  for (let i = 0; i < 3; i++) {
+    const img = ASSETS.land[Math.floor(Math.random() * ASSETS.land.length)];
+    _spawnHigh(highNextSpawnX, img, 'land');
   }
 }
 
@@ -263,7 +310,7 @@ function checkLanding(prevBottom) {
   for (const t of tiles) {
     const L = t.left - cameraX, R = t.right - cameraX;
     if (pR <= L + 3 || pL >= R - 3) continue;
-    // 踩到 trap（刺朝上）→ 失败
+    // 踩到 trap（刺朝上，地面层）→ 失败
     if (t.type === 'trap') {
       if (prevBottom <= t.top + 1 && pB >= t.top - 1) {
         die();
@@ -271,10 +318,25 @@ function checkLanding(prevBottom) {
       }
       continue;
     }
+    // trap2（高台吊刺）上面可以正常站，不算 trap 落地
     if (prevBottom <= t.top + 2 && pB >= t.top) {
       player.y = t.top; player.vy = 0; player.onGround = true; player.jumping = false;
       return true;
     }
+  }
+  return false;
+}
+
+// 检查 trap2（高台吊刺）碰撞：玩家 box 与刺 AABB 重叠 → die
+// 这是从 high 跳到 ground 时会触发的死亡判定（checkLanding 处理不了）
+function checkDamage() {
+  const px = player.boxX, py = player.boxY, pw = player.boxW, ph = player.boxH;
+  for (const t of tiles) {
+    const d = t.getDamageBox(cameraX);
+    if (!d) continue;
+    if (px + pw <= d.x || px >= d.x + d.w) continue;
+    if (py + ph <= d.y || py >= d.y + d.h) continue;
+    return true;
   }
   return false;
 }
@@ -316,18 +378,27 @@ function update() {
   }
   // 掉到地面以下 → 失败
   if (player.y > LAYER_GROUND + 200) { die(); return; }
+  // 撞到 trap2 刺 → 失败（从 high 跳下会经过刺区域）
+  if (checkDamage()) { die(); return; }
 
   cameraX += speed;
+
+  // 持续生成新 tile（视野右边 100px 外）
+  let _safety = 0;
+  while (nextSpawnX < cameraX + W + 100 || highNextSpawnX < cameraX + W + 100) {
+    // 如果只 high 落后，单独补 high
+    if (nextSpawnX >= cameraX + W + 100) {
+      spawnHighNext();
+    } else {
+      spawnNext();
+    }
+    if (++_safety > 60) break;
+  }
 
   // 清理视野外的 tile
   tiles = tiles.filter(t => t.right > cameraX - 50 && t.left < cameraX + W + 100);
 
   // 持续生成新 tile（视野右边 100px 外）
-  let _safety = 0;
-  while (nextSpawnX < cameraX + W + 100) {
-    spawnNext();
-    if (++_safety > 30) break;
-  }
 }
 
 // ===== 渲染 =====
